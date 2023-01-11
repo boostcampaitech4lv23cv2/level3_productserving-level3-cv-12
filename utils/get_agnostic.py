@@ -10,42 +10,28 @@ import argparse
 from tqdm import tqdm
 
 
-def get_im_parse_agnostic(im_parse, pose_data, w=768, h=1024):
+def get_im_parse_agnostic(im_parse):
     parse_array = np.array(im_parse)
-    parse_upper = ((parse_array == 4).astype(np.float32))
-    parse_bottom = ((parse_array == 6).astype(np.float32) +
-                    (parse_array == 8).astype(np.float32))
-    parse_neck = (parse_array == 10).astype(np.float32)
+    parse_upper = ((parse_array == 4).astype(np.uint8))
+    parse_bottom = ((parse_array == 6).astype(np.uint8) +
+                    (parse_array == 8).astype(np.uint8))
+    # 원래는 목 부분을 지우는데 dress code는 목에 대한 segmentation class가 없어 face를 선택하여 face를 지움
+    parse_neck = (parse_array == 11).astype(np.uint8)
 
-    r = 10
+    parse_arms = ((parse_array == 14).astype(np.uint8) +
+                  (parse_array == 15).astype(np.uint8))
+    parse_legs = ((parse_array == 12).astype(np.uint8) +
+                  (parse_array == 13).astype(np.uint8))
+
     agnostic = im_parse.copy()
-
-    # mask arms
-    for parse_id, pose_ids in [(14, [2, 5, 6, 7]), (15, [5, 2, 3, 4])]:
-        mask_arm = Image.new('L', (w, h), 'black')
-        mask_arm_draw = ImageDraw.Draw(mask_arm)
-        i_prev = pose_ids[0]
-        for i in pose_ids[1:]:
-            if (pose_data[i_prev, 0] == 0.0 and pose_data[i_prev, 1] == 0.0) or (pose_data[i, 0] == 0.0 and pose_data[i, 1] == 0.0):
-                continue
-            mask_arm_draw.line([tuple(pose_data[j]) for j in [i_prev, i]], 'white', width=r*10)
-            pointx, pointy = pose_data[i]
-            radius = r*4 if i == pose_ids[-1] else r*15
-            mask_arm_draw.ellipse((pointx-radius, pointy-radius, pointx+radius, pointy+radius), 'white', 'white')
-            i_prev = i
-        parse_arm = (np.array(mask_arm) / 255) * (parse_array == parse_id).astype(np.float32)
-        agnostic.paste(0, None, Image.fromarray(np.uint8(parse_arm * 255), 'L'))
-
-    # mask leg
-    for parse_ids in [12, 13]:
-        mask_leg = Image.new('L', (w, h), 'black')
-        parse_leg = (np.array(mask_leg) / 255) * (parse_array == parse_ids).astype(np.float32)
-        agnostic.paste(0, None, Image.fromarray(np.uint8(parse_leg * 255), 'L'))
 
     # mask torso & neck
     agnostic.paste(0, None, Image.fromarray(np.uint8(parse_upper * 255), 'L'))
     agnostic.paste(0, None, Image.fromarray(np.uint8(parse_bottom * 255), 'L'))
     agnostic.paste(0, None, Image.fromarray(np.uint8(parse_neck * 255), 'L'))
+
+    agnostic.paste(0, None, Image.fromarray(np.uint8(parse_arms * 255), 'L'))
+    agnostic.paste(0, None, Image.fromarray(np.uint8(parse_legs * 255), 'L'))
 
     return agnostic
 
@@ -64,24 +50,11 @@ if __name__=="__main__":
     for im_name in tqdm(os.listdir(osp.join(data_path, 'images'))):
         if '_1.jpg' in im_name:
             continue
-        
-        # load pose image
-        pose_name = im_name.replace('_0.jpg', '_2.json')
-        
-        try:
-            with open(osp.join(data_path, 'keypoints', pose_name), 'r') as f:
-                pose_label = json.load(f)
-                pose_data = pose_label['keypoints']
-                pose_data = np.array(pose_data)
-                pose_data = pose_data.reshape((-1, 3))[:, :2]
-        except IndexError:
-            print(pose_name)
-            continue
 
         # load parsing image
-        parse_name = im_name.replace('0.jpg', '4.png')
+        parse_name = im_name.replace('_0.jpg', '_4.png')
         im_parse = Image.open(osp.join(data_path, 'label_maps', parse_name))
 
-        agnostic = get_im_parse_agnostic(im_parse, pose_data)
+        agnostic = get_im_parse_agnostic(im_parse)
         
         agnostic.save(osp.join(output_path, parse_name))
